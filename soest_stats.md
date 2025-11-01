@@ -1,0 +1,785 @@
+Soest Symposium
+================
+Jack Howell
+
+## Load Libraries
+
+``` r
+library(tidyverse)
+library(here)
+library(vegan)
+library(seacarb)
+library(lubridate)
+library(car)
+library(lme4)
+library(scales)
+library(ggeffects)
+library(sjPlot)
+library(patchwork)
+library(forcats)
+library(tidytext)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(ggimage)
+library(forcats)
+```
+
+## Load in Data
+
+``` r
+df <- readr::read_csv("master.csv")
+if ("???" %in% names(df)) df <- df %>% select(-`???`)
+meta_cols <- c("Site", "Year", "Coral Colony", "Size_m")
+species_cols <- setdiff(names(df), meta_cols)
+df <- df %>%
+  mutate(across(all_of(species_cols), ~ suppressWarnings(as.numeric(.x)))) %>%
+  mutate(across(all_of(species_cols), ~ replace_na(.x, 0)))
+```
+
+``` r
+df_stats <- df %>%
+  rowwise() %>%
+  mutate(
+    Richness = sum(c_across(all_of(species_cols)) > 0, na.rm = TRUE),   # richness still counts how many species present
+    Abundance = sum(c_across(all_of(species_cols)), na.rm = TRUE),     # total counts (no > 0 here)
+    Shannon   = vegan::diversity(c_across(all_of(species_cols)), index = "shannon")  # uses relative abundances
+  ) %>%
+  ungroup()
+```
+
+## Standard Error and Site × Year summary (mean ± SE, n)
+
+``` r
+#Calculates the standard Error with a Standard error functoin that can be called later
+se <- function(x) if (length(x) > 1) sd(x, na.rm = TRUE)/sqrt(sum(!is.na(x))) else 0
+
+
+sum_sy <- df_stats %>%
+  group_by(Site, Year) %>%
+  summarise(
+    n = n(),
+    Richness_mean = mean(Richness, na.rm = TRUE),
+    Richness_se   = se(Richness),
+    Abundance_mean = mean(Abundance, na.rm = TRUE),
+    Abundance_se   = se(Abundance),
+    Shannon_mean   = mean(Shannon, na.rm = TRUE),
+    Shannon_se     = se(Shannon),
+    .groups = "drop"
+  ) %>%
+  arrange(Site, Year)
+
+sum_sy
+```
+
+    ## # A tibble: 36 × 9
+    ##    Site    Year     n Richness_mean Richness_se Abundance_mean Abundance_se
+    ##    <chr>  <dbl> <int>         <dbl>       <dbl>          <dbl>        <dbl>
+    ##  1 DC1000  2023   104         1.31        0.125           2.47        0.465
+    ##  2 GC852   2016    68         1.56        0.140           2.40        0.305
+    ##  3 GC852   2017    68         1.29        0.124           1.93        0.277
+    ##  4 GC852   2022    68         0.647       0.104           1.01        0.195
+    ##  5 MC036   2011    38         0.711       0.210           1.05        0.366
+    ##  6 MC036   2014    38         1.95        0.238           3.74        0.630
+    ##  7 MC036   2023    38         1.11        0.180           1.95        0.397
+    ##  8 MC294   2011    62         0.726       0.142           1.02        0.225
+    ##  9 MC294   2012    62         1.05        0.155           1.31        0.205
+    ## 10 MC294   2013    62         1.13        0.127           1.74        0.309
+    ## # ℹ 26 more rows
+    ## # ℹ 2 more variables: Shannon_mean <dbl>, Shannon_se <dbl>
+
+``` r
+species_totals <- df_stats %>%
+  select(all_of(species_cols)) %>%
+  summarise(across(everything(), \(x) sum(x, na.rm = TRUE))) %>%
+  pivot_longer(cols = everything(),
+               names_to = "Species", values_to = "Total") %>%
+  filter(Total > 0) %>%                                    # drop zero-abundance
+  arrange(desc(Total)) %>%
+  mutate(Species = fct_reorder(Species, Total))
+
+# Select top 15 species after filtering
+top15 <- species_totals %>% slice_max(Total, n = 15)
+
+# Plot
+ggplot(top15, aes(x = Species, y = Total, fill = Species)) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Top 15 Most Abundant Species",
+    x = "Species", y = "Total Abundance"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "none",
+    axis.text.y = element_text(size = 10),
+    plot.title = element_text(hjust = 0.5, face = "bold")  # center title
+  )
+```
+
+![](soest_stats_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->
+
+``` r
+species_totals <- df_stats %>%
+  select(all_of(species_cols)) %>%
+  summarise(across(everything(), \(x) sum(x, na.rm = TRUE))) %>%
+  pivot_longer(cols = everything(),
+               names_to = "Species", values_to = "Total") %>%
+  filter(Total > 0) %>%                                    # drop zero-abundance
+  filter(!str_detect(Species, "Asteroschema"),
+         !str_detect(Species, "Hydrozoa"),!str_detect(Species, "Trachythela"),!str_detect(Species, "Malacalcyonacea"),!str_detect(Species, "Stolonifera"),!str_detect(Species, "Zoantharia")) %>%              
+  arrange(desc(Total)) %>%
+  mutate(Species = fct_reorder(Species, Total))
+
+# Select top 15 species after filtering
+top15 <- species_totals %>% slice_max(Total, n = 15)
+
+# Plot
+ggplot(top15, aes(x = Species, y = Total, fill = Species)) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Top 15 Most Abundant Species\n(Asteroschema clavigerum and Matting Organisms Excluded)",
+    x = "Species", y = "Total Abundance"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "none",
+    axis.text.y = element_text(size = 10),
+    plot.title = element_text(hjust = 0.5, face = "bold")  # center title
+  )
+```
+
+![](soest_stats_files/figure-gfm/unnamed-chunk-6-1.png)<!-- -->
+
+## Broken up by Site Most Abundant Species
+
+``` r
+# 0) Load or construct df_stats *earlier* in the Rmd.
+stopifnot(exists("df_stats"))
+
+# 1) Identify species columns robustly (numeric, non-meta, has any nonzero)
+known_meta <- c(
+  "Site","Year","Richness","Abundance","Shannon",
+  "Size_m","Size (m)","Notes","Observer","Transect","PhotoID","ID","Index"
+)
+
+species_cols <- df_stats %>%
+  select(-any_of(known_meta)) %>%
+  select(where(is.numeric)) %>%
+  select(where(~ suppressWarnings(max(., na.rm = TRUE)) > 0)) %>%
+  names()
+
+stopifnot(length(species_cols) > 0)
+
+# 2) Build species_by_site (excludes Asteroschema & Hydrozoa)
+species_by_site <- df_stats %>%
+  select(Site, all_of(species_cols)) %>%
+  pivot_longer(all_of(species_cols), names_to = "Species", values_to = "Count") %>%
+  mutate(Count = replace_na(Count, 0)) %>%
+  filter(!str_detect(Species, "Asteroschema"),
+         !str_detect(Species, "Hydrozoa"),!str_detect(Species, "Trachythela"),!str_detect(Species, "Malacalcyonacea"),!str_detect(Species, "Stolonifera"),!str_detect(Species, "Zoantharia")) %>%
+  group_by(Site, Species) %>%
+  summarise(Total = sum(Count, na.rm = TRUE), .groups = "drop")
+
+# 3) Top 10 per site — avoid zero-tie blowups; deterministic tie-break
+top10_by_site <- species_by_site %>%
+  group_by(Site) %>%
+  filter(Total > 0) %>%
+  arrange(desc(Total), Species, .by_group = TRUE) %>%
+  slice_head(n = 10) %>%
+  ungroup() %>%
+  mutate(Species_re = reorder_within(Species, Total, Site))
+
+# 4) Plot
+ggplot(top10_by_site, aes(x = Species_re, y = Total, fill = Species)) +
+  geom_col() +
+  coord_flip() +
+  facet_wrap(~ Site, scales = "free_y") +
+  scale_x_reordered() +
+  labs(
+  title = "Top 10 Most Abundant Species per Site\n(Asteroschema clavigerum and Matting Organisms Excluded)",
+  x = "Species", 
+  y = "Total abundance"
+) +
+theme_minimal(base_size = 13) +
+theme(
+  plot.title = element_text(size = 12, hjust = 0.5, lineheight = 1.1),
+  plot.title.position = "plot",
+  legend.position = "none",
+  axis.text.y = element_text(size = 9),
+  strip.text = element_text(size = 12, face = "bold")
+)
+```
+
+![](soest_stats_files/figure-gfm/unnamed-chunk-7-1.png)<!-- -->
+
+``` r
+# Load patchwork
+library(patchwork)
+
+# Size vs. Community Metrics
+p1 <- ggplot(df_stats, aes(x = Size_m, y = Abundance)) +
+  geom_point(alpha = 0.6, size = 2) +
+  geom_smooth(method = "lm", se = TRUE, color = "steelblue") +
+  labs(x = "Coral Size (m)", y = "Total Abundance") +
+  theme_bw(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+
+p2 <- ggplot(df_stats, aes(x = Size_m, y = Richness)) +
+  geom_point(alpha = 0.6, size = 2) +
+  geom_smooth(method = "lm", se = TRUE, color = "darkgreen") +
+  labs(x = "Coral Size (m)", y = "Species Richness") +
+  theme_bw(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+
+p3 <- ggplot(df_stats, aes(x = Size_m, y = Shannon)) +
+  geom_point(alpha = 0.6, size = 2) +
+  geom_smooth(method = "lm", se = TRUE, color = "purple") +
+  labs(x = "Coral Size (m)", y = "Shannon Diversity (H′)") +
+  theme_bw(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+
+# Combine plots with title
+(p1 | p2 | p3) +
+  plot_annotation(
+    title = "Size vs. Community Metrics Across All Sites\n2017-2024",
+    theme = theme(
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 16)
+    )
+  )
+```
+
+    ## `geom_smooth()` using formula = 'y ~ x'
+
+    ## Warning: Removed 2755 rows containing non-finite outside the scale range
+    ## (`stat_smooth()`).
+
+    ## Warning: Removed 2755 rows containing missing values or values outside the scale range
+    ## (`geom_point()`).
+
+    ## `geom_smooth()` using formula = 'y ~ x'
+
+    ## Warning: Removed 2755 rows containing non-finite outside the scale range
+    ## (`stat_smooth()`).
+    ## Removed 2755 rows containing missing values or values outside the scale range
+    ## (`geom_point()`).
+
+    ## `geom_smooth()` using formula = 'y ~ x'
+
+    ## Warning: Removed 2755 rows containing non-finite outside the scale range
+    ## (`stat_smooth()`).
+    ## Removed 2755 rows containing missing values or values outside the scale range
+    ## (`geom_point()`).
+
+![](soest_stats_files/figure-gfm/unnamed-chunk-8-1.png)<!-- -->
+
+``` r
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(rlang)
+```
+
+    ## 
+    ## Attaching package: 'rlang'
+
+    ## The following objects are masked from 'package:purrr':
+    ## 
+    ##     %@%, flatten, flatten_chr, flatten_dbl, flatten_int, flatten_lgl,
+    ##     flatten_raw, invoke, splice
+
+``` r
+# 1) Ensure Size_m is numeric
+df <- df %>%
+  mutate(Size_m = suppressWarnings(as.numeric(Size_m)))
+
+# 2) Recompute stats with a "safe" Shannon (0 when total = 0)
+shannon_safe <- function(x) {
+  sx <- sum(x, na.rm = TRUE)
+  if (sx <= 0) return(0)        # or return(NA_real_) if you prefer to drop them
+  vegan::diversity(x, index = "shannon")
+}
+
+df_stats <- df %>%
+  rowwise() %>%
+  mutate(
+    Richness = sum(c_across(all_of(species_cols)) > 0, na.rm = TRUE),
+    Abundance = sum(c_across(all_of(species_cols)), na.rm = TRUE),
+    Shannon   = shannon_safe(c_across(all_of(species_cols)))
+  ) %>%
+  ungroup()
+
+# 3) Filter sites and keep only finite x/y for each panel
+df_subset <- df_stats %>%
+  filter(Site %in% c("MC294", "MC297", "MC344"))
+
+make_panel <- function(site, yvar, ylab) {
+  dat <- df_subset %>%
+    filter(Site == site) %>%
+    mutate(yval = .data[[yvar]]) %>%
+    filter(is.finite(Size_m), is.finite(yval))
+
+  suppressMessages( # hush the 'y ~ x' message
+    ggplot(dat, aes(x = Size_m, y = yval)) +
+      geom_point(alpha = 0.7, size = 2, na.rm = TRUE) +
+      geom_smooth(method = "lm", se = TRUE, na.rm = TRUE) +
+      labs(
+        title = paste(site, "—", ylab),
+        x = "Coral Size (m)",
+        y = ylab
+      ) +
+      theme_bw(base_size = 13) +
+      theme(
+        plot.title = element_text(hjust = 0.5, face = "bold"),
+        panel.grid.minor = element_blank()
+      )
+  )
+}
+
+# Build 9 panels
+p_abund_294 <- make_panel("MC294", "Abundance", "Total Abundance")
+p_abund_297 <- make_panel("MC297", "Abundance", "Total Abundance")
+p_abund_344 <- make_panel("MC344", "Abundance", "Total Abundance")
+
+p_rich_294  <- make_panel("MC294", "Richness", "Species Richness")
+p_rich_297  <- make_panel("MC297", "Richness", "Species Richness")
+p_rich_344  <- make_panel("MC344", "Richness", "Species Richness")
+
+p_shan_294  <- make_panel("MC294", "Shannon", "Shannon Diversity (H′)")
+p_shan_297  <- make_panel("MC297", "Shannon", "Shannon Diversity (H′)")
+p_shan_344  <- make_panel("MC344", "Shannon", "Shannon Diversity (H′)")
+
+# Arrange 3×3
+# Create the combined grid object (same as before)
+grid_3x3 <- (p_abund_294 | p_abund_297 | p_abund_344) /
+            (p_rich_294  | p_rich_297  | p_rich_344)  /
+            (p_shan_294  | p_shan_297  | p_shan_344) +
+  plot_annotation(
+    title = "Size vs. Community Metrics by Site (MC294, MC297, MC344)\n2017-2024",
+    theme = theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16))
+  )
+
+# 👇 This line actually displays the figure but hides the 'y ~ x' messages
+suppressMessages(print(grid_3x3))
+```
+
+![](soest_stats_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
+
+``` r
+library(dplyr)
+
+df_binned <- df_stats %>%
+  filter(Site %in% c("MC294", "MC297", "MC344")) %>%
+  mutate(Size_bin = cut(
+    Size_m,
+    breaks = c(0, 0.25, 0.5, 0.75, 1, 1.5, 2, Inf),  # adjust as needed
+    labels = c("<0.25", "0.25–0.5", "0.5–0.75", "0.75–1", "1–1.5", "1.5–2", ">2"),
+    include.lowest = TRUE
+  )) %>%
+  filter(!is.na(Size_bin))  # ✅ drops any N/A bin
+```
+
+``` r
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+
+# Shared y-limit across all three panels
+ymax <- max(df_binned$Abundance, na.rm = TRUE)
+
+make_box <- function(site_label) {
+  ggplot(filter(df_binned, Site == site_label),
+         aes(x = Size_bin, y = Abundance)) +
+    geom_boxplot(outlier.shape = 21, outlier.alpha = 0.5, fill = "grey80") +
+    coord_cartesian(ylim = c(0, ymax)) +
+    labs(
+      title = site_label,
+      x = "Coral Size Class (m)",
+      y = "Total Abundance"
+    ) +
+    theme_bw(base_size = 13) +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      panel.grid.minor = element_blank()
+    )
+}
+
+p294 <- make_box("MC294")
+p297 <- make_box("MC297")
+p344 <- make_box("MC344")
+
+# Stitch side-by-side with a single overall title
+(p294 | p297 | p344) +
+  plot_annotation(
+    title = "Abundance by Coral Size Class",
+    theme = theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16))
+  )
+```
+
+![](soest_stats_files/figure-gfm/unnamed-chunk-11-1.png)<!-- -->
+
+``` r
+df_density <- df_stats %>%
+  filter(Site %in% c("MC294", "MC297", "MC344")) %>%
+  mutate(
+    Density = Abundance / Size_m   # total abundance per meter of coral
+  ) %>%
+  filter(is.finite(Density))       # drop any NaN or Inf from Size_m = 0
+```
+
+``` r
+library(patchwork)
+library(dplyr)
+
+make_density_plot <- function(site_name) {
+  ggplot(filter(df_density, Site == site_name),
+         aes(x = Size_m, y = Density)) +
+    geom_point(alpha = 0.6, size = 2, color = "steelblue") +
+    geom_smooth(method = "lm", se = TRUE, color = "black") +
+    labs(
+      title = site_name,
+      x = "Coral Size (m)",
+      y = "Epifaunal Density (Abundance per m)"
+    ) +
+    theme_bw(base_size = 13) +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      panel.grid.minor = element_blank()
+    )
+}
+
+p294 <- make_density_plot("MC294")
+p297 <- make_density_plot("MC297")
+p344 <- make_density_plot("MC344")
+
+(p294 | p297 | p344) +
+  plot_annotation(
+    title = "Epifaunal Density vs Coral Size (by Site)",
+    theme = theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16))
+  )
+```
+
+    ## `geom_smooth()` using formula = 'y ~ x'
+    ## `geom_smooth()` using formula = 'y ~ x'
+    ## `geom_smooth()` using formula = 'y ~ x'
+
+![](soest_stats_files/figure-gfm/unnamed-chunk-13-1.png)<!-- -->
+
+``` r
+library(dplyr)
+library(broom)  # for tidy summaries
+
+# Run a linear model of Density ~ Size_m for each site
+site_models <- df_density %>%
+  filter(Site %in% c("MC294", "MC297", "MC344")) %>%
+  group_by(Site) %>%
+  do(tidy(lm(Density ~ Size_m, data = .))) %>%
+  ungroup()
+
+site_models
+```
+
+    ## # A tibble: 6 × 6
+    ##   Site  term        estimate std.error statistic     p.value
+    ##   <chr> <chr>          <dbl>     <dbl>     <dbl>       <dbl>
+    ## 1 MC294 (Intercept)   0.473     0.0838      5.64 0.000000232
+    ## 2 MC294 Size_m       -0.0187    0.0180     -1.04 0.302      
+    ## 3 MC297 (Intercept)   1.77      0.507       3.49 0.000667   
+    ## 4 MC297 Size_m       -0.249     0.123      -2.02 0.0454     
+    ## 5 MC344 (Intercept)   2.72      0.885       3.07 0.00287    
+    ## 6 MC344 Size_m       -0.451     0.358      -1.26 0.212
+
+``` r
+df_density %>%
+  group_by(Site) %>%
+  do(anova(lm(Density ~ Size_m, data = .)))
+```
+
+    ## # A tibble: 6 × 6
+    ## # Groups:   Site [3]
+    ##   Site     Df `Sum Sq` `Mean Sq` `F value` `Pr(>F)`
+    ##   <chr> <int>    <dbl>     <dbl>     <dbl>    <dbl>
+    ## 1 MC294     1    0.215     0.215      1.08   0.302 
+    ## 2 MC294    82   16.4       0.200     NA     NA     
+    ## 3 MC297     1   47.8      47.8        4.09   0.0454
+    ## 4 MC297   123 1440.       11.7       NA     NA     
+    ## 5 MC344     1   62.6      62.6        1.58   0.212 
+    ## 6 MC344    82 3244.       39.6       NA     NA
+
+``` r
+library(dplyr)
+library(broom)
+library(ggplot2)
+library(patchwork)
+
+# 1️⃣ Fit models for each site and extract stats
+site_stats <- df_density %>%
+  filter(Site %in% c("MC294", "MC297", "MC344")) %>%
+  group_by(Site) %>%
+  do({
+    model <- lm(Density ~ Size_m, data = .)
+    tibble(
+      r2 = summary(model)$r.squared,
+      p = coef(summary(model))["Size_m", "Pr(>|t|)"]
+    )
+  }) %>%
+  ungroup()
+
+site_stats
+```
+
+    ## # A tibble: 3 × 3
+    ##   Site      r2      p
+    ##   <chr>  <dbl>  <dbl>
+    ## 1 MC294 0.0130 0.302 
+    ## 2 MC297 0.0322 0.0454
+    ## 3 MC344 0.0189 0.212
+
+``` r
+#> # A tibble: 3 × 3
+#>   Site     r2        p
+#>   <chr>  <dbl>    <dbl>
+#> 1 MC294  0.25     0.013
+#> 2 MC297  0.10     0.27
+#> 3 MC344  0.35     0.004
+
+# 2️⃣ Create a helper plotting function
+make_density_plot <- function(site_name) {
+  stats <- filter(site_stats, Site == site_name)
+  r2_label <- sprintf("R² = %.2f", stats$r2)
+  p_label  <- ifelse(stats$p < 0.001, "p < 0.001",
+                     sprintf("p = %.3f", stats$p))
+  label_text <- paste(r2_label, p_label, sep = ", ")
+
+  ggplot(filter(df_density, Site == site_name),
+         aes(x = Size_m, y = Density)) +
+    geom_point(alpha = 0.6, size = 2, color = "steelblue") +
+    geom_smooth(method = "lm", se = TRUE, color = "black") +
+    annotate("text", x = Inf, y = Inf, label = label_text,
+             hjust = 1.1, vjust = 1.5, size = 4.5,
+             fontface = "bold", color = "black") +
+    labs(
+      title = site_name,
+      x = "Coral Size (m)",
+      y = "Epifaunal Density (Abundance per m)"
+    ) +
+    theme_bw(base_size = 13) +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      panel.grid.minor = element_blank()
+    )
+}
+
+# 3️⃣ Build patchwork
+p294 <- make_density_plot("MC294")
+p297 <- make_density_plot("MC297")
+p344 <- make_density_plot("MC344")
+
+(p294 | p297 | p344) +
+  plot_annotation(
+    title = "Epifaunal Density vs Coral Size (by Site)\nwith Model R² and p-values",
+    theme = theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16))
+  )
+```
+
+    ## `geom_smooth()` using formula = 'y ~ x'
+    ## `geom_smooth()` using formula = 'y ~ x'
+    ## `geom_smooth()` using formula = 'y ~ x'
+
+![](soest_stats_files/figure-gfm/unnamed-chunk-16-1.png)<!-- -->
+
+``` r
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(broom)
+
+# ---------- 1) Trim outliers by site (e.g., keep within 1st–95th percentile) ----------
+df_trim <- df_density %>%
+  filter(Site %in% c("MC294", "MC297", "MC344"),
+         is.finite(Size_m), is.finite(Density)) %>%
+  group_by(Site) %>%
+  mutate(
+    lo = quantile(Density, 0.01, na.rm = TRUE),
+    hi = quantile(Density, 0.95, na.rm = TRUE)
+  ) %>%
+  ungroup() %>%
+  # keep within the percentile window
+  filter(Density >= lo, Density <= hi)
+
+# ---------- 2) Shared y-limit across panels (from trimmed data) ----------
+ymax <- df_trim %>% summarise(y = max(Density, na.rm = TRUE)) %>% pull(y)
+
+# ---------- 3) Refit models on trimmed data & extract R² / p ----------
+site_stats <- df_trim %>%
+  group_by(Site) %>%
+  do({
+    m <- lm(Density ~ Size_m, data = .)
+    tibble(
+      r2 = summary(m)$r.squared,
+      p  = coef(summary(m))["Size_m", "Pr(>|t|)"]
+    )
+  }) %>%
+  ungroup()
+
+# ---------- 4) Plot helper ----------
+make_density_plot <- function(site_name) {
+  stats <- filter(site_stats, Site == site_name)
+  r2_label <- sprintf("R² = %.2f", stats$r2)
+  p_label  <- ifelse(stats$p < 0.001, "p < 0.001",
+                     sprintf("p = %.3f", stats$p))
+  label_text <- paste(r2_label, p_label, sep = ", ")
+
+  ggplot(filter(df_trim, Site == site_name),
+         aes(x = Size_m, y = Density)) +
+    geom_point(alpha = 0.6, size = 2, color = "steelblue") +
+    geom_smooth(method = "lm", se = TRUE, color = "black") +
+    coord_cartesian(ylim = c(0, ymax)) +   # shared y scale
+    annotate("text", x = Inf, y = Inf, label = label_text,
+             hjust = 1.1, vjust = 1.5, size = 4.5, fontface = "bold") +
+    labs(
+      title = site_name,
+      x = "Coral Size (m)",
+      y = "Epifaunal Density (Abundance per m)"
+    ) +
+    theme_bw(base_size = 13) +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      panel.grid.minor = element_blank()
+    )
+}
+
+# ---------- 5) Build patchwork ----------
+p294 <- make_density_plot("MC294")
+p297 <- make_density_plot("MC297")
+p344 <- make_density_plot("MC344")
+
+(p294 | p297 | p344) +
+  plot_annotation(
+    title = "Epifaunal Density vs Coral Size (Trimmed at 1–95% by Site)",
+    theme = theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16))
+  )
+```
+
+    ## `geom_smooth()` using formula = 'y ~ x'
+    ## `geom_smooth()` using formula = 'y ~ x'
+    ## `geom_smooth()` using formula = 'y ~ x'
+
+![](soest_stats_files/figure-gfm/unnamed-chunk-17-1.png)<!-- -->
+
+``` r
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+
+# Subset to target sites and keep finite values
+df_density_sub <- df_density %>%
+  filter(Site %in% c("MC294", "MC297", "MC344"),
+         is.finite(Density))
+
+# Histogram for each site
+p_hist <- ggplot(df_density_sub, aes(x = Density)) +
+  geom_histogram(bins = 30, fill = "steelblue", color = "white", alpha = 0.7) +
+  facet_wrap(~ Site, scales = "free_y") +
+  labs(
+    x = "Epifaunal Density (Abundance per m)",
+    y = "Count of colonies",
+    title = "Distribution of Epifaunal Density by Site"
+  ) +
+  theme_bw(base_size = 13) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+
+# Boxplot overview (same scale across sites)
+p_box <- ggplot(df_density_sub, aes(x = Site, y = Density, fill = Site)) +
+  geom_boxplot(outlier.shape = 21, outlier.alpha = 0.4) +
+  labs(
+    x = "Site",
+    y = "Epifaunal Density (Abundance per m)",
+    title = "Boxplot of Epifaunal Density by Site"
+  ) +
+  theme_bw(base_size = 13) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    legend.position = "none"
+  )
+
+# Display both plots stacked
+p_hist / p_box
+```
+
+![](soest_stats_files/figure-gfm/unnamed-chunk-18-1.png)<!-- -->
+
+``` r
+library(dplyr)
+
+# Define trimming rule: 2.5–97.5 % by site
+df_density_flagged <- df_density %>%
+  filter(Site %in% c("MC294", "MC297", "MC344"),
+         is.finite(Density)) %>%
+  group_by(Site) %>%
+  mutate(
+    lower_cut = quantile(Density, 0.025, na.rm = TRUE),
+    upper_cut = quantile(Density, 0.975, na.rm = TRUE),
+    to_trim   = Density < lower_cut | Density > upper_cut
+  ) %>%
+  ungroup()
+
+# ---- View the rows that WOULD be trimmed ----
+trimmed_points <- df_density_flagged %>%
+  filter(to_trim) %>%
+  select(
+    Site,
+    Coral_Colony = `Coral Colony`,
+    Size_m,
+    Abundance,
+    Density,
+    lower_cut,
+    upper_cut
+  ) %>%
+  arrange(Site, desc(Density))
+
+trimmed_points
+```
+
+    ## # A tibble: 10 × 7
+    ##    Site  Coral_Colony Size_m Abundance Density lower_cut upper_cut
+    ##    <chr> <chr>         <dbl>     <dbl>   <dbl>     <dbl>     <dbl>
+    ##  1 MC294 B10           0.416         1    2.40         0      1.27
+    ##  2 MC294 F4            2.23          3    1.35         0      1.27
+    ##  3 MC294 A2            0.785         1    1.27         0      1.27
+    ##  4 MC297 MM1-43        0.151         5   33.1          0      3.76
+    ##  5 MC297 MM1-43        0.151         3   19.8          0      3.76
+    ##  6 MC297 M6-8          0.858         5    5.83         0      3.76
+    ##  7 MC297 M3-13         1.29          5    3.88         0      3.76
+    ##  8 MC344 M32-12        0.124         7   56.5          0      7.95
+    ##  9 MC344 M42-5         0.110         1    9.12         0      7.95
+    ## 10 MC344 M32-13        0.372         3    8.06         0      7.95
+
+``` r
+ggplot(df_density, aes(x = Site, y = Density, fill = Site)) +
+  geom_boxplot(outlier.shape = NA) +
+  coord_cartesian(ylim = c(0, quantile(df_density$Density, 0.95, na.rm = TRUE))) +  # 👈 trims to 95th percentile
+  labs(
+    x = "Site",
+    y = "Epifaunal Density (Abundance per m)",
+    title = "Comparison of Epifaunal Density Across Sites"
+  ) +
+  theme_bw(base_size = 14) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+```
+
+![](soest_stats_files/figure-gfm/unnamed-chunk-20-1.png)<!-- -->
