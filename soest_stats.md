@@ -91,15 +91,35 @@ sum_sy
 
 ``` r
 species_totals <- df_stats %>%
+  # Exclude site MC036 first
+  filter(Site != "MC036") %>%
+  
+  # Keep only species columns
   select(all_of(species_cols)) %>%
+  
+  # Sum abundance across all samples
   summarise(across(everything(), \(x) sum(x, na.rm = TRUE))) %>%
+  
+  # Convert to long format
   pivot_longer(cols = everything(),
                names_to = "Species", values_to = "Total") %>%
-  filter(Total > 0) %>%                                    # drop zero-abundance
+  
+  # Filter out unwanted taxa
+  filter(
+    Total > 0,
+    !str_detect(Species, "Hydrozoa"),
+    !str_detect(Species, "Trachythela"),
+    !str_detect(Species, "Malacalcyonacea"),
+    !str_detect(Species, "Stolonifera"),
+    !str_detect(Species, "Zoantharia"),
+    !str_detect(Species, "Amphipoda sp\\. hy")
+  ) %>%
+  
+  # Arrange and reorder factors
   arrange(desc(Total)) %>%
   mutate(Species = fct_reorder(Species, Total))
 
-# Select top 15 species after filtering
+# Select top 15 species
 top15 <- species_totals %>% slice_max(Total, n = 15)
 
 # Plot
@@ -107,14 +127,13 @@ ggplot(top15, aes(x = Species, y = Total, fill = Species)) +
   geom_col() +
   coord_flip() +
   labs(
-    title = "Top 15 Most Abundant Species",
     x = "Species", y = "Total Abundance"
   ) +
   theme_minimal(base_size = 14) +
   theme(
     legend.position = "none",
     axis.text.y = element_text(size = 10),
-    plot.title = element_text(hjust = 0.5, face = "bold")  # center title
+    plot.title = element_text(hjust = 0.5, face = "bold")
   )
 ```
 
@@ -173,17 +192,26 @@ species_cols <- df_stats %>%
 
 stopifnot(length(species_cols) > 0)
 
-# 2) Build species_by_site (excludes Asteroschema & Hydrozoa)
+# 2) Build species_by_site with SAME CONSTRAINTS (exclude MC036 + taxa)
 species_by_site <- df_stats %>%
+  # Exclude MC036
+  filter(Site != "MC036") %>%
+  
   select(Site, all_of(species_cols)) %>%
   pivot_longer(all_of(species_cols), names_to = "Species", values_to = "Count") %>%
   mutate(Count = replace_na(Count, 0)) %>%
-  filter(!str_detect(Species, "Asteroschema"),
-         !str_detect(Species, "Hydrozoa"),!str_detect(Species, "Trachythela"),!str_detect(Species, "Malacalcyonacea"),!str_detect(Species, "Stolonifera"),!str_detect(Species, "Zoantharia")) %>%
+  filter(
+    !str_detect(Species, "Asteroschema"),
+    !str_detect(Species, "Hydrozoa"),
+    !str_detect(Species, "Trachythela"),
+    !str_detect(Species, "Malacalcyonacea"),
+    !str_detect(Species, "Stolonifera"),
+    !str_detect(Species, "Zoantharia"),
+    !str_detect(Species, "Amphipoda sp\\. hy")
+  ) %>%
   group_by(Site, Species) %>%
   summarise(Total = sum(Count, na.rm = TRUE), .groups = "drop")
 
-# 3) Top 10 per site — avoid zero-tie blowups; deterministic tie-break
 top10_by_site <- species_by_site %>%
   group_by(Site) %>%
   filter(Total > 0) %>%
@@ -192,28 +220,75 @@ top10_by_site <- species_by_site %>%
   ungroup() %>%
   mutate(Species_re = reorder_within(Species, Total, Site))
 
-# 4) Plot
 ggplot(top10_by_site, aes(x = Species_re, y = Total, fill = Species)) +
   geom_col() +
   coord_flip() +
-  facet_wrap(~ Site, scales = "free_y") +
+  facet_wrap(~ Site, scales = "free_y") +  # ← THIS is the key
   scale_x_reordered() +
   labs(
-  title = "Top 10 Most Abundant Species per Site\n(Asteroschema clavigerum and Matting Organisms Excluded)",
-  x = "Species", 
-  y = "Total abundance"
-) +
-theme_minimal(base_size = 13) +
-theme(
-  plot.title = element_text(size = 12, hjust = 0.5, lineheight = 1.1),
-  plot.title.position = "plot",
-  legend.position = "none",
-  axis.text.y = element_text(size = 9),
-  strip.text = element_text(size = 12, face = "bold")
-)
+    title = "Top 10 Most Abundant Species per Site\n(Selected Taxa and MC036 Excluded)",
+    x = "Species",
+    y = "Total abundance"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(size = 12, hjust = 0.5, lineheight = 1.1),
+    plot.title.position = "plot",
+    legend.position = "none",
+    axis.text.y = element_text(size = 9),
+    strip.text = element_text(size = 12, face = "bold")
+  )
 ```
 
 ![](soest_stats_files/figure-gfm/unnamed-chunk-7-1.png)<!-- -->
+
+``` r
+# 1) Top 10 per site
+top10_by_site <- species_by_site %>%
+  group_by(Site) %>%
+  filter(Total > 0) %>%
+  arrange(desc(Total), Species, .by_group = TRUE) %>%
+  slice_head(n = 10) %>%
+  ungroup()
+
+sites <- sort(unique(top10_by_site$Site))
+
+# 2) One plot per site, with taller aspect ratio
+plot_list <- lapply(sites, function(s) {
+  df_s <- top10_by_site %>%
+    filter(Site == s) %>%
+    mutate(Species = fct_reorder(Species, Total))
+  
+  ggplot(df_s, aes(x = Total, y = Species, fill = Species)) +
+    geom_col() +
+    labs(
+      title = s,
+      x = "Total abundance",
+      y = NULL
+    ) +
+    theme_minimal(base_size = 11) +
+    theme(
+      legend.position = "none",
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      axis.text.y = element_text(size = 8),
+      axis.text.x = element_text(size = 8)
+    ) +
+    theme(aspect.ratio = 1.2)   # <- makes each panel taller
+})
+
+# 3) Combine with patchwork
+combined_plot <- wrap_plots(plot_list, ncol = 2) +
+  plot_annotation(
+    title = "Top 10 Most Abundant Species per Site\n(Selected Taxa and MC036 Excluded)",
+    theme = theme(
+      plot.title = element_text(size = 14, hjust = 0.5, face = "bold")
+    )
+  )
+
+combined_plot
+```
+
+![](soest_stats_files/figure-gfm/unnamed-chunk-8-1.png)<!-- -->
 
 ``` r
 # Load patchwork
@@ -279,7 +354,7 @@ p3 <- ggplot(df_stats, aes(x = Size_m, y = Shannon)) +
     ## Removed 2755 rows containing missing values or values outside the scale range
     ## (`geom_point()`).
 
-![](soest_stats_files/figure-gfm/unnamed-chunk-8-1.png)<!-- -->
+![](soest_stats_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
 
 ``` r
 library(dplyr)
@@ -371,7 +446,7 @@ grid_3x3 <- (p_abund_294 | p_abund_297 | p_abund_344) /
 suppressMessages(print(grid_3x3))
 ```
 
-![](soest_stats_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
+![](soest_stats_files/figure-gfm/unnamed-chunk-10-1.png)<!-- -->
 
 ``` r
 library(dplyr)
@@ -425,7 +500,7 @@ p344 <- make_box("MC344")
   )
 ```
 
-![](soest_stats_files/figure-gfm/unnamed-chunk-11-1.png)<!-- -->
+![](soest_stats_files/figure-gfm/unnamed-chunk-12-1.png)<!-- -->
 
 ``` r
 df_density <- df_stats %>%
@@ -472,7 +547,7 @@ p344 <- make_density_plot("MC344")
     ## `geom_smooth()` using formula = 'y ~ x'
     ## `geom_smooth()` using formula = 'y ~ x'
 
-![](soest_stats_files/figure-gfm/unnamed-chunk-13-1.png)<!-- -->
+![](soest_stats_files/figure-gfm/unnamed-chunk-14-1.png)<!-- -->
 
 ``` r
 library(dplyr)
@@ -595,7 +670,7 @@ p344 <- make_density_plot("MC344")
     ## `geom_smooth()` using formula = 'y ~ x'
     ## `geom_smooth()` using formula = 'y ~ x'
 
-![](soest_stats_files/figure-gfm/unnamed-chunk-16-1.png)<!-- -->
+![](soest_stats_files/figure-gfm/unnamed-chunk-17-1.png)<!-- -->
 
 ``` r
 library(dplyr)
@@ -674,7 +749,7 @@ p344 <- make_density_plot("MC344")
     ## `geom_smooth()` using formula = 'y ~ x'
     ## `geom_smooth()` using formula = 'y ~ x'
 
-![](soest_stats_files/figure-gfm/unnamed-chunk-17-1.png)<!-- -->
+![](soest_stats_files/figure-gfm/unnamed-chunk-18-1.png)<!-- -->
 
 ``` r
 library(ggplot2)
@@ -718,7 +793,7 @@ p_box <- ggplot(df_density_sub, aes(x = Site, y = Density, fill = Site)) +
 p_hist / p_box
 ```
 
-![](soest_stats_files/figure-gfm/unnamed-chunk-18-1.png)<!-- -->
+![](soest_stats_files/figure-gfm/unnamed-chunk-19-1.png)<!-- -->
 
 ``` r
 library(dplyr)
@@ -782,4 +857,4 @@ ggplot(df_density, aes(x = Site, y = Density, fill = Site)) +
   )
 ```
 
-![](soest_stats_files/figure-gfm/unnamed-chunk-20-1.png)<!-- -->
+![](soest_stats_files/figure-gfm/unnamed-chunk-21-1.png)<!-- -->
