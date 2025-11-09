@@ -230,6 +230,10 @@ ggplot(top10_by_site, aes(x = Species_re, y = Total, fill = Species)) +
   )
 ```
 ```{r}
+library(dplyr)
+library(ggplot2)
+library(forcats)
+
 # 1) Top 10 per site
 top10_by_site <- species_by_site %>%
   group_by(Site) %>%
@@ -258,21 +262,25 @@ plot_list <- lapply(sites, function(s) {
       legend.position = "none",
       plot.title = element_text(hjust = 0.5, face = "bold"),
       axis.text.y = element_text(size = 8),
-      axis.text.x = element_text(size = 8)
-    ) +
-    theme(aspect.ratio = 1.2)   # <- makes each panel taller
+      axis.text.x = element_text(size = 8),
+      aspect.ratio = 1.2
+    )
 })
 
-# 3) Combine with patchwork
-combined_plot <- wrap_plots(plot_list, ncol = 2) +
-  plot_annotation(
-    title = "Top 10 Most Abundant Species per Site\n(Selected Taxa and MC036 Excluded)",
-    theme = theme(
-      plot.title = element_text(size = 14, hjust = 0.5, face = "bold")
-    )
-  )
+# 3) Just show each plot separately (not combined)
+for (p in plot_list) {
+  print(p)
+}
 
-combined_plot
+library(purrr)
+
+walk2(plot_list, sites, ~ ggsave(
+  filename = paste0("Top10_", .y, ".png"),
+  plot     = .x,
+  width    = 5,
+  height   = 7,
+  dpi      = 300
+))
 ```
 
 ```{r}
