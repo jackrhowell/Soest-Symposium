@@ -233,49 +233,57 @@ ggplot(top10_by_site, aes(x = Species_re, y = Total, fill = Species)) +
 library(dplyr)
 library(ggplot2)
 library(forcats)
+library(purrr)
 
-# 1) Top 10 per site
-top10_by_site <- species_by_site %>%
+# 1) Top 5 per site
+top5_by_site <- species_by_site %>%
   group_by(Site) %>%
   filter(Total > 0) %>%
   arrange(desc(Total), Species, .by_group = TRUE) %>%
-  slice_head(n = 10) %>%
+  slice_head(n = 5) %>%
   ungroup()
 
-sites <- sort(unique(top10_by_site$Site))
+sites <- sort(unique(top5_by_site$Site))
 
-# 2) One plot per site, with taller aspect ratio
+# 2) Consistent colors across all species
+all_species <- sort(unique(top5_by_site$Species))
+n_species <- length(all_species)
+species_colors <- setNames(
+  scales::hue_pal()(n_species),  # you can swap for viridis if you prefer
+  all_species
+)
+
+# 3) One plot per site
 plot_list <- lapply(sites, function(s) {
-  df_s <- top10_by_site %>%
+  df_s <- top5_by_site %>%
     filter(Site == s) %>%
     mutate(Species = fct_reorder(Species, Total))
   
   ggplot(df_s, aes(x = Total, y = Species, fill = Species)) +
-    geom_col() +
+    geom_col(width = 0.7) +
+    scale_fill_manual(values = species_colors) +
     labs(
       title = s,
       x = "Total abundance",
       y = NULL
     ) +
-    theme_minimal(base_size = 11) +
+    scale_x_continuous(expand = expansion(mult = c(0, 0.05))) +
+    theme_minimal(base_size = 13) +  # bump up general font size
     theme(
       legend.position = "none",
-      plot.title = element_text(hjust = 0.5, face = "bold"),
-      axis.text.y = element_text(size = 8),
-      axis.text.x = element_text(size = 8),
-      aspect.ratio = 1.2
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+      axis.text.y = element_text(size = 12, face = "bold"),  # big species names
+      axis.text.x = element_text(size = 10),
+      aspect.ratio = 1.1
     )
 })
 
-# 3) Just show each plot separately (not combined)
-for (p in plot_list) {
-  print(p)
-}
+# 4) Show plots
+for (p in plot_list) print(p)
 
-library(purrr)
-
+# 5) Save plots
 walk2(plot_list, sites, ~ ggsave(
-  filename = paste0("Top10_", .y, ".png"),
+  filename = paste0("Top5_", .y, ".png"),
   plot     = .x,
   width    = 5,
   height   = 7,
